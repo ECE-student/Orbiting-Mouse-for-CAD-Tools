@@ -1,0 +1,102 @@
+#include <Wire.h>
+#include <Adafruit_MLX90393.h>
+#include <TinyUSB_Mouse_and_Keyboard.h>  // TinyUSB HID support
+
+// Create a custom I2C bus on GPIO 24 (SDA) and GPIO 25 (SCL)
+TwoWire myWire(i2c0, 24, 25);
+
+// MLX90393 sensor
+Adafruit_MLX90393 mlx = Adafruit_MLX90393();
+
+// Config
+#define DEAD_ZONE 0.5       // In mT
+#define BUTTON_HOME 28
+#define BUTTON_FIT  27
+
+bool isOrbiting = false;
+
+void setup() {
+    pinMode(BUTTON_HOME, INPUT_PULLUP);
+    pinMode(BUTTON_FIT, INPUT_PULLUP);
+
+    Mouse.begin();       // TinyUSB Mouse
+    Keyboard.begin();    // TinyUSB Keyboard
+
+    // Start custom I2C
+    myWire.begin();
+
+    Serial.begin(115200);
+    while (!Serial);
+
+    Serial.println("Initializing MLX90393...");
+
+    // Start sensor on custom I2C
+    if (mlx.begin_I2C(0x18, &myWire)) {
+        Serial.println("MLX90393 initialized.");
+    } else {
+        Serial.println("Failed to find MLX90393. Check wiring!");
+        while (1);
+    }
+}
+
+void loop() {
+    float x, y, z;
+
+    if (mlx.readData(&x, &y, &z)) {
+        x /= 1000.0;
+        y /= 1000.0;
+
+        Serial.print("X: "); Serial.print(x, 3);
+        Serial.print(" mT, Y: "); Serial.print(y, 3);
+        Serial.print(" mT, Z: "); Serial.print(z / 1000.0, 3);
+        Serial.println(" mT");
+
+        if (abs(x) > DEAD_ZONE || abs(y) > DEAD_ZONE) {
+            if (!isOrbiting) {
+                Serial.println(">>> Entering orbit mode");
+                Keyboard.press(KEY_LEFT_SHIFT);  // Hold Shift
+                Mouse.press(MOUSE_MIDDLE);       // Hold Middle Mouse
+                isOrbiting = true;
+            }
+
+            int xMove = map((int)(x * 100), -50, 50, -127, 127);
+            int yMove = map((int)(y * 100), -50, 50, -127, 127);
+
+            Serial.print("Mouse move -> X: ");
+            Serial.print(xMove);
+            Serial.print(", Y: ");
+            Serial.println(yMove);
+
+            Mouse.move(xMove, yMove);
+        } else if (isOrbiting) {
+            Serial.println("<<< Exiting orbit mode");
+            Mouse.release(MOUSE_MIDDLE);
+            Keyboard.release(KEY_LEFT_SHIFT);
+            isOrbiting = false;
+        }
+    } else {
+        Serial.println("Failed to read MLX90393 data.");
+    }
+
+    // Go Home (Shift + D)
+    if (digitalRead(BUTTON_HOME) == LOW) {
+        Serial.println("[Button] Go Home pressed");
+        Keyboard.press(KEY_LEFT_SHIFT);
+        Keyboard.press('d');
+        delay(50);
+        Keyboard.release('d');
+        Keyboard.release(KEY_LEFT_SHIFT);
+        delay(500);
+    }
+
+    // Fit to Screen (F6)
+    if (digitalRead(BUTTON_FIT) == LOW) {
+        Serial.println("[Button] Fit to Screen pressed");
+        Keyboard.press(KEY_F6);
+        delay(50);
+        Keyboard.release(KEY_F6);
+        delay(500);
+    }
+
+    delay(10);
+}
